@@ -1,0 +1,71 @@
+#!/bin/bash
+# Set wireless connections
+
+# Check rfkill setup
+softRfkill=$(rfkill list | grep Soft | awk '{print $3}')
+hardRfkill=$(rfkill list | grep Hard | awk '{print $3}')
+if [[ $hardRfkill = "yes" ]]; then
+	echo "Wireless hardware off"
+	exit 1
+elif [[ $softRfkill = "yes" ]]; then
+	echo "Trying to unblock first identifier"
+	rfkill unblock 0
+	retVal=$?
+	if [ $retVal -ne 0 ]; then
+		echo "Please exec 'rfkill list' to check blocked device"
+		exit 1
+	fi
+fi
+
+# Check if args are provided
+if [ -z "$1" ];	then
+	echo "Please, provide wpa_supplicant name file (eg: if /etc/wpa_supplicant/wpa_supplicant_mynetwork.conf type mynetwork)";
+	exit 1
+elif [[ -z "$2" ]]; then
+	echo "Please, provide interface name (eg: wlp4s0)";
+	exit 1
+else
+	ip l set up dev "$2";
+	retVal=$?
+	if [ $retVal -ne 0 ]; then
+		echo "Can't set up device $2"
+		exit 1
+	fi
+
+	if [ -e "/var/run/wpa_supplicant/$2" ]; then
+		echo "Want to kill current wpa_supplicant process ? [Y/n]"
+		read killwpa
+		if [[ $killwpa = "Y" || -z $killwpa ]]; then
+			# Grep wpa_supplicant PID with a unix trick by adding [] to remove
+			# the grep PID
+			wpaPID=$(ps -x | grep [w]pa_supplicant | awk '{print $1}')
+			while kill -15 $wpaPID 2> /dev/null; do sleep 1; done;
+	  else
+			echo "Are u serious.. I will kill myself"
+			exit 0
+		fi
+	fi
+	wpa_supplicant -B -i wlp4s0 -c /etc/wpa_supplicant/wpa_supplicant_"$1".conf;
+	retVal=$?
+	if [ $retVal -ne 0 ]; then
+		echo "wpa_supplicant error"
+		exit 1
+	fi
+	if [ -e "/run/dhcpcd-$2.pid" ]; then
+		echo "Want to kill current DHCPCD process ? [Y/n]"
+		read killdhcpcd
+		if [[ $killdhcpcd = "Y" || -z $killdhcpcd ]]; then
+			dhcpcdPID=$(cat "/run/dhcpcd-$2.pid")
+			while kill -15 $dhcpcdPID 2> /dev/null; do sleep 1; done;
+		else
+			echo "Are u serious.. I will kill myself"
+			exit 0
+		fi
+	fi
+	dhcpcd wlp4s0;
+	retVal=$?
+	if [ $retVal -ne 0 ]; then
+		echo "dhcpcd error"
+		exit 1
+	fi
+fi
